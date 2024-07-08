@@ -82,6 +82,7 @@ class DDPM(pl.LightningModule):
                  use_positional_encodings=False,
                  learn_logvar=False,
                  logvar_init=0.,
+                 use_fp16 = False,
                  ):
         super().__init__()
         assert parameterization in ["eps", "x0"], 'currently only supporting "eps" and "x0"'
@@ -137,6 +138,8 @@ class DDPM(pl.LightningModule):
         #     self.logvar = nn.Parameter(self.logvar, requires_grad=True)
         #     self.logvar = nn.Parameter(self.logvar, requires_grad=True)
 
+        if use_fp16:
+            self.unet_config["params"].update({"use_fp16": True})
 
 
     def register_schedule(self, given_betas=None, beta_schedule="linear", timesteps=1000,
@@ -302,9 +305,9 @@ class DDPM(pl.LightningModule):
                 extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise)
 
     def get_loss(self, pred, target, mean=True):
-        print("target dtype", target.dtype)
+
         target = target.half()
-        print("target dtype", target.dtype)
+
         if self.loss_type == 'l1':
             loss = (target - pred).abs()
             if mean:
@@ -316,7 +319,6 @@ class DDPM(pl.LightningModule):
                 loss = torch.nn.functional.mse_loss(target, pred, reduction='none')
         else:
             raise NotImplementedError("unknown loss type '{loss_type}'")
-        print("---------loss dtype", loss.dtype)
         return loss
 
     def p_losses(self, x_start, t, noise=None):
@@ -364,13 +366,11 @@ class DDPM(pl.LightningModule):
             x = batch[k]
         else:
             x = batch
-        # print(x)
         if len(x.shape) == 3:
             x = x[..., None]
         x = rearrange(x, 'b h w c -> b c h w')
         # x = x.to(memory_format=torch.contiguous_format).float()
         x = x.to(memory_format=torch.contiguous_format).float().half()
-        print("input dtype", x.dtype)
         return x
 
     def shared_step(self, batch):
@@ -473,6 +473,7 @@ class LatentDiffusion(DDPM):
                  conditioning_key=None,
                  scale_factor=1.0,
                  scale_by_std=False,
+                 use_fp16=False,
                  *args, **kwargs):
         self.num_timesteps_cond = default(num_timesteps_cond, 1)
         self.scale_by_std = scale_by_std
@@ -484,7 +485,7 @@ class LatentDiffusion(DDPM):
             conditioning_key = None
         ckpt_path = kwargs.pop("ckpt_path", None)
         ignore_keys = kwargs.pop("ignore_keys", [])
-        super().__init__(conditioning_key=conditioning_key, *args, **kwargs)
+        super().__init__(conditioning_key=conditioning_key, use_fp16=use_fp16 *args, **kwargs)
         self.concat_mode = concat_mode
         self.cond_stage_trainable = cond_stage_trainable
         self.cond_stage_key = cond_stage_key
@@ -498,6 +499,8 @@ class LatentDiffusion(DDPM):
             self.register_buffer('scale_factor', torch.tensor(scale_factor))
         self.first_stage_config = first_stage_config
         self.cond_stage_config = cond_stage_config
+        if use_fp16:
+            self.cond_stage_config["params"].update({"use_fp16": True})
         # self.instantiate_first_stage(first_stage_config)
         # self.instantiate_cond_stage(cond_stage_config)
         self.cond_stage_forward = cond_stage_forward
@@ -1471,7 +1474,6 @@ class DiffusionWrapper(pl.LightningModule):
         assert self.conditioning_key in [None, 'concat', 'crossattn', 'hybrid', 'adm']
 
     def forward(self, x, t, c_concat: list = None, c_crossattn: list = None):
-        print("x dtype", x.dtype)
         if self.conditioning_key is None:
             out = self.diffusion_model(x, t)
         elif self.conditioning_key == 'concat':

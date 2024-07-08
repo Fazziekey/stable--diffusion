@@ -42,7 +42,6 @@ model:
         context_dim: 768
         use_checkpoint: False
         legacy: False
-        use_fp16: True
 
     first_stage_config:
       target: ldm.models.autoencoder.AutoencoderKL
@@ -84,21 +83,15 @@ data:
 
 lightning:
   trainer:
-    gpus: '0'
+    gpus: '0,1,2,3'
     log_gpu_memory: all
-    precision: 16
+    precision: 32
     strategy:
-      # target: pytorch_lightning.strategies.DDPStrategy
-      # params:
-      #   find_unused_parameters: False
-      target: pytorch_lightning.strategies.ColossalAIStrategy
+      target: pytorch_lightning.strategies.DDPStrategy
       params:
-        use_chunk: False
-        enable_distributed_storage: True,
-        placement_policy: cuda
-        initial_scale: 32
+        find_unused_parameters: False
     log_every_n_steps: 2
 #    max_steps: 6o
     logger: True
-    default_root_dir: "/home/lcmql/diff_log/"
+    default_root_dir: "/tmp/diff_log/"
     profiler: pytorch
